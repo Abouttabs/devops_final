@@ -1,8 +1,18 @@
 vse: &vse
   docker:
     - image: circleci/node:8.11.3
+ansible:
+  docker: &ansible
+    - image: 'circleci/python:latest'
+      environment:
+          ANSIBLE_HOST_KEY_CHECKING: no
+          AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+          AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+          AWS_SESSION_TOKEN: $AWS_SESSION_TOKEN
 
 version: 2.1
+orbs:
+  ansible-playbook: orbss/ansible-playbook@0.0.5
 jobs:
   build:
     <<: *vse
@@ -14,10 +24,32 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - "."
+            - .
+  deploy:
+    docker: *ansible
+    steps:
+      - attach_workspace:
+          at: .
+      - ansible-playbook/install
+      - run:
+         command:
+          sudo pip install ansible boto boto3
+      - add_ssh_keys:
+          fingerprints:
+            - "58:13:8a:5f:de:aa:57:fb:14:44:90:db:a3:87:58:9e"
+      - run: echo $SSH_PRIVATE_KEY | sed 's/<CRLF>/\n/g' > devops.pem
+      - run: chmod 400 devops.pem
+      - ansible-playbook/playbook:
+          playbook: ./ansible/ec2_deploy.yml
+          playbook-options: --user ubuntu --key-file devops.pem
 workflows:
   version: 2.1
   build:
     jobs:
       - build
-
+      - deploy:
+         requires:
+            - build
+         filters:
+            branches:
+               only: master
